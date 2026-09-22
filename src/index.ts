@@ -179,19 +179,24 @@ program
   .command('login')
   .description('Hubungkan API Key SarangAI akun Anda')
   .action(async () => {
+    const baseUrl = resolveBaseUrl();
+    console.log(chalk.cyanBright('\n🔐 Autentikasi SarangAI CLI'));
+    console.log(chalk.gray('Dapatkan API Key Anda di: ') + chalk.underline.cyan(`${baseUrl}/dashboard`));
+    console.log(chalk.gray('--------------------------------------------------\n'));
+
     const res = await prompts({
       type: 'password',
       name: 'key',
-      message: 'Masukkan SarangAI API Key Anda (dari dashboard panel):',
+      message: 'Masukkan SarangAI API Key Anda:',
     });
 
     if (!res.key) {
-      console.log(chalk.red('Login dibatalkan.'));
+      console.log(chalk.red('\nLogin dibatalkan.\n'));
       return;
     }
 
     saveConfig({ apiKey: res.key.trim() });
-    console.log(chalk.green('✔ API Key berhasil disimpan di ~/.sarangairc'));
+    console.log(chalk.green('\n✔ Berhasil terhubung! API Key tersimpan di ~/.sarangairc\n'));
   });
 
 // 2. sarang balance
