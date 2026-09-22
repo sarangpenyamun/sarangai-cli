@@ -2,28 +2,30 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const CONFIG_PATH = path.join(os.homedir(), '.sarangairc');
-
-export interface CliConfig {
+export interface SarangConfig {
   apiKey?: string;
   baseUrl?: string;
   defaultModel?: string;
 }
 
-export function getConfig(): CliConfig {
+const CONFIG_FILE = path.join(os.homedir(), '.sarangairc');
+
+export function getConfig(): SarangConfig {
   try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+    if (fs.existsSync(CONFIG_FILE)) {
+      const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
+      return JSON.parse(raw);
     }
   } catch {}
+
   return {
-    baseUrl: 'https://panel.idshop.or.id',
-    defaultModel: 'openai/gpt-5-pro',
+    baseUrl: 'https://idshop.or.id',
+    defaultModel: 'minimax/minimax-m2.7',
   };
 }
 
-export function saveConfig(cfg: Partial<CliConfig>) {
+export function saveConfig(newConfig: Partial<SarangConfig>): void {
   const current = getConfig();
-  const next = { ...current, ...cfg };
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), 'utf-8');
+  const merged = { ...current, ...newConfig };
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2), 'utf-8');
 }
