@@ -11,7 +11,7 @@ const program = new Command();
 
 function resolveBaseUrl(): string {
   const cfg = getConfig();
-  return process.env.SARANGAI_BASE_URL || cfg.baseUrl || 'https://api.sarang.ai';
+  return process.env.SARANGAI_BASE_URL || cfg.baseUrl || 'https://idshop.or.id';
 }
 
 function getGitBranch(): string {
@@ -36,10 +36,9 @@ function renderBanner(modelName: string) {
   console.log(chalk.cyanBright(banner));
   console.log(chalk.gray('  Tips for getting started:'));
   console.log(chalk.gray('  1. Ketik pesan Anda langsung untuk chat streaming.'));
-  console.log(chalk.gray('  2. Perintah khusus: ') + chalk.yellow('/clear') + chalk.gray(' (bersihkan layar), ') + chalk.yellow('/model <id>') + chalk.gray(', ') + chalk.yellow('/exit') + chalk.gray('.'));
+  console.log(chalk.gray('  2. Perintah: ') + chalk.yellow('/clear') + chalk.gray(', ') + chalk.yellow('/model <id>') + chalk.gray(', ') + chalk.yellow('/exit') + chalk.gray('.'));
   console.log('');
 
-  // Status Bar
   const cwd = path.basename(process.cwd());
   const branch = getGitBranch();
   const leftStatus = chalk.gray(`📂 ~/${cwd} `) + chalk.magenta(`(${branch})`);
@@ -50,11 +49,10 @@ function renderBanner(modelName: string) {
   console.log('');
 }
 
-// Interactive TUI REPL Session
 async function startInteractiveSession(initialModel?: string) {
   const cfg = getConfig();
   if (!cfg.apiKey) {
-    console.log(chalk.yellow('Silakan login terlebih dahulu: sarang login'));
+    console.log(chalk.yellow('\nSilakan login terlebih dahulu: sarang login\n'));
     return;
   }
 
@@ -97,7 +95,7 @@ async function startInteractiveSession(initialModel?: string) {
           saveConfig({ defaultModel: currentModel });
           console.log(chalk.green(`\n✔ Model dialihkan ke: ${currentModel}\n`));
         } else {
-          console.log(chalk.yellow(`\nFormat: /model <model-id> (contoh: /model openai/gpt-4o-mini)\n`));
+          console.log(chalk.yellow(`\nFormat: /model <model-id>\n`));
         }
         ask();
         return;
@@ -168,9 +166,8 @@ async function startInteractiveSession(initialModel?: string) {
 program
   .name('sarang')
   .description(chalk.cyanBright('SarangAI CLI — Gateway ratusan model AI langsung di terminal'))
-  .version('1.0.0')
+  .version('1.0.3')
   .action(() => {
-    // Mengetik `sarang` tanpa subperintah akan langsung masuk ke interactive TUI mode
     startInteractiveSession();
   });
 
@@ -181,13 +178,13 @@ program
   .action(async () => {
     const baseUrl = resolveBaseUrl();
     console.log(chalk.cyanBright('\n🔐 Autentikasi SarangAI CLI'));
-    console.log(chalk.gray('Dapatkan API Key Anda di: ') + chalk.underline.cyan(`${baseUrl}/dashboard`));
+    console.log(chalk.gray('Dapatkan API Key di: ') + chalk.underline.cyan(`${baseUrl}/dashboard`));
     console.log(chalk.gray('--------------------------------------------------\n'));
 
     const res = await prompts({
       type: 'password',
       name: 'key',
-      message: 'Masukkan SarangAI API Key Anda:',
+      message: 'Masukkan API Key:',
     });
 
     if (!res.key) {
@@ -196,17 +193,36 @@ program
     }
 
     saveConfig({ apiKey: res.key.trim() });
-    console.log(chalk.green('\n✔ Berhasil terhubung! API Key tersimpan di ~/.sarangairc\n'));
+    console.log(chalk.green('\n✔ Berhasil! API Key tersimpan di ~/.sarangairc\n'));
   });
 
-// 2. sarang balance
+// 2. sarang set-url
+program
+  .command('set-url [url]')
+  .description('Atur Base URL Gateway SarangAI')
+  .action(async (url) => {
+    let target = url;
+    if (!target) {
+      const res = await prompts({
+        type: 'text',
+        name: 'url',
+        message: 'Masukkan URL Gateway:',
+      });
+      target = res.url;
+    }
+    if (!target) return;
+    saveConfig({ baseUrl: target.trim().replace(/\/+$/, '') });
+    console.log(chalk.green(`✔ Base URL diatur ke: ${target.trim()}`));
+  });
+
+// 3. sarang balance
 program
   .command('balance')
   .description('Cek sisa saldo kredit akun SarangAI Anda')
   .action(async () => {
     const cfg = getConfig();
     if (!cfg.apiKey) {
-      console.log(chalk.yellow('Anda belum login. Jalankan: sarang login'));
+      console.log(chalk.yellow('\nAnda belum login. Jalankan: sarang login\n'));
       return;
     }
 
@@ -222,7 +238,7 @@ program
       try {
         data = JSON.parse(rawText);
       } catch {
-        throw new Error(`Endpoint mengembalikan respons non-JSON (${res.status}): ${rawText.slice(0, 120)}...`);
+        throw new Error(`Respons server non-JSON (${res.status}): ${rawText.slice(0, 100)}`);
       }
 
       spinner.stop();
@@ -237,15 +253,15 @@ program
     }
   });
 
-// 3. sarang models
+// 4. sarang models
 program
   .command('models')
-  .option('-s, --search <keyword>', 'Filter nama model (contoh: claude, deepseek, free)')
-  .description('Daftar model AI yang tersedia di SarangAI Gateway')
+  .option('-s, --search <keyword>', 'Filter nama model')
+  .description('Daftar model AI yang tersedia')
   .action(async (cmd) => {
     const cfg = getConfig();
     if (!cfg.apiKey) {
-      console.log(chalk.yellow('Anda belum login. Jalankan: sarang login'));
+      console.log(chalk.yellow('\nAnda belum login. Jalankan: sarang login\n'));
       return;
     }
 
@@ -270,42 +286,30 @@ program
 
       let list: any[] = Array.isArray(data) ? data : data.data || [];
       if (list.length === 0) {
-        console.log(chalk.yellow('Tidak ada model aktif yang ditemukan.'));
+        console.log(chalk.yellow('Tidak ada model yang ditemukan.'));
         return;
       }
 
       if (cmd.search) {
-        const query = cmd.search.toLowerCase();
-        list = list.filter((m) => {
-          const id = (m.id || m.modelId || m.name || '').toLowerCase();
-          return id.includes(query);
-        });
+        const q = cmd.search.toLowerCase();
+        list = list.filter((m) => (m.id || m.modelId || m.name || '').toLowerCase().includes(q));
       }
 
-      if (list.length === 0) {
-        console.log(chalk.yellow(`\nTidak ada model yang cocok dengan kata kunci "${cmd.search}".\n`));
-        return;
-      }
-
-      console.log(chalk.bold(`\nModel Tersedia (${list.length}${cmd.search ? ` cocok dengan "${cmd.search}"` : ''}):`));
+      console.log(chalk.bold(`\nModel Tersedia (${list.length}):`));
       console.log(chalk.gray('---------------------------------------------------------'));
 
       list.forEach((m) => {
         const id = m.id || m.modelId || m.name;
         const isCurrent = id === cfg.defaultModel;
-        const prefix = isCurrent ? chalk.green('✔ [Aktif] ') : '  ';
-        console.log(`${prefix}${chalk.cyan(id)}`);
+        console.log(`${isCurrent ? chalk.green('✔ [Aktif] ') : '  '}${chalk.cyan(id)}`);
       });
-
-      console.log(chalk.gray('---------------------------------------------------------'));
-      console.log(chalk.dim('Ganti model default : sarang set-model <model-id>'));
-      console.log(chalk.dim('Chat model tertentu : sarang chat -m <model-id> "..."\n'));
+      console.log(chalk.gray('---------------------------------------------------------\n'));
     } catch (err: any) {
       spinner.fail(chalk.red(err.message));
     }
   });
 
-// 4. sarang set-model
+// 5. sarang set-model
 program
   .command('set-model [modelId]')
   .description('Atur model default untuk chat')
@@ -315,7 +319,7 @@ program
       const res = await prompts({
         type: 'text',
         name: 'model',
-        message: 'Masukkan Model ID default baru (contoh: minimax/minimax-m2.7):',
+        message: 'Masukkan Model ID default baru:',
       });
       target = res.model;
     }
@@ -324,15 +328,14 @@ program
     console.log(chalk.green(`✔ Default model berhasil diubah ke: ${target.trim()}`));
   });
 
-// 5. sarang chat
+// 6. sarang chat
 program
   .command('chat [prompt...]')
-  .option('-m, --model <modelId>', 'Pilih model AI spesifik')
-  .description('Kirim instruksi / chat ke AI (Mendukung streaming teks atau Unix Pipe)')
+  .option('-m, --model <modelId>', 'Pilih model spesifik')
+  .description('Kirim instruksi / chat (Mendukung streaming teks atau Unix Pipe)')
   .action(async (promptArr, cmd) => {
     let prompt = promptArr?.join(' ');
 
-    // Cek apakah ada input pipa (stdin pipe)
     if (!process.stdin.isTTY) {
       const chunks: Buffer[] = [];
       for await (const chunk of process.stdin) {
@@ -342,16 +345,14 @@ program
       prompt = prompt ? `${prompt}\n\n${pipedData}` : pipedData;
     }
 
-    // Jika tanpa pipe dan tanpa prompt, luncurkan TUI Interactive Mode
     if (!prompt) {
       await startInteractiveSession(cmd.model);
       return;
     }
 
-    // Jika ada prompt / stdin pipe, jalankan mode direct pipe (Unix style)
     const cfg = getConfig();
     if (!cfg.apiKey) {
-      console.log(chalk.yellow('Silakan login terlebih dahulu: sarang login'));
+      console.log(chalk.yellow('\nSilakan login terlebih dahulu: sarang login\n'));
       return;
     }
 
