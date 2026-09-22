@@ -1,0 +1,43 @@
+{
+  "name": "sarangai-cli",
+  "version": "1.0.0",
+  "description": "CLI resmi SarangAI — Gateway multi-model AI langsung dari terminal Anda",
+  "main": "dist/index.cjs",
+  "bin": {
+    "sarang": "dist/index.cjs",
+    "sarangai": "dist/index.cjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "sarangai",
+    "cli",
+    "ai",
+    "llm",
+    "openai",
+    "deepseek",
+    "claude",
+    "gateway"
+  ],
+  "author": "SarangAI Team",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^12.1.0",
+    "ora": "^5.4.1",
+    "prompts": "^2.4.2",
+    "readline-sync": "^1.4.10"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "@types/prompts": "^2.4.9",
+    "@types/readline-sync": "^1.4.8",
+    "tsup": "^8.5.1",
+    "typescript": "^5.5.2"
+  }
+}
