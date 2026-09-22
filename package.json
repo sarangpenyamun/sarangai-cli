@@ -1,6 +1,6 @@
 {
   "name": "sarangai-cli",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "CLI resmi SarangAI — Gateway multi-model AI langsung dari terminal Anda",
   "main": "dist/index.cjs",
   "bin": {

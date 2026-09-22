@@ -166,7 +166,7 @@ async function startInteractiveSession(initialModel?: string) {
 program
   .name('sarang')
   .description(chalk.cyanBright('SarangAI CLI — Gateway ratusan model AI langsung di terminal'))
-  .version('1.0.3')
+  .version(require('../package.json').version)
   .action(() => {
     startInteractiveSession();
   });
