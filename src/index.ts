@@ -178,7 +178,7 @@ program
   .action(async () => {
     const baseUrl = resolveBaseUrl();
     console.log(chalk.cyanBright('\n🔐 Autentikasi SarangAI CLI'));
-    console.log(chalk.gray('Dapatkan API Key di: ') + chalk.underline.cyan(`${baseUrl}/dashboard`));
+    console.log(chalk.gray('Dapatkan API Key di: ') + chalk.underline.cyan(`${baseUrl}`));
     console.log(chalk.gray('--------------------------------------------------\n'));
 
     const res = await prompts({
