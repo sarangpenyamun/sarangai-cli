@@ -20,7 +20,7 @@ export function getConfig(): SarangConfig {
 
   return {
     baseUrl: 'https://idshop.or.id',
-    defaultModel: 'minimax/minimax-m2.7',
+    defaultModel: 'deepseek/deepseek-chat',
   };
 }
 

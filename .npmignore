@@ -1,7 +1,5 @@
 src/
 tsconfig.json
-tsup.config.ts
-.gitignore
 .git/
-.sarangairc
+.github/
 *.log

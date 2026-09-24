@@ -7,9 +7,4 @@ export default defineConfig({
   banner: {
     js: '#!/usr/bin/env node',
   },
-  outExtension() {
-    return {
-      js: '.cjs',
-    };
-  },
 });

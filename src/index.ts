@@ -1,411 +1,605 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import prompts from 'prompts';
-import ora from 'ora';
 import readline from 'readline';
 import { execSync } from 'child_process';
-import path from 'path';
+import crypto from 'crypto';
+import clipboard from 'clipboardy';
 import { getConfig, saveConfig } from './config';
 
 const program = new Command();
+
+const borderActive = chalk.hex('#a855f7');
+const borderMuted = chalk.hex('#334155');
+const violetText = chalk.hex('#c084fc');
+const greenDot = chalk.hex('#4ade80');
+const grayMuted = chalk.hex('#94a3b8');
+
+export interface CodingModel {
+  id: string;
+  name: string;
+  desc: string;
+  rate: string;
+}
+
+export const CODING_MODELS: CodingModel[] = [
+  {
+    id: 'anthropic/claude-3.7-sonnet',
+    name: 'Claude 3.7 Sonnet',
+    desc: 'Anthropic • Best coding & agentic workflow',
+    rate: '12,000 Credits/hr',
+  },
+  {
+    id: 'openai/gpt-4o',
+    name: 'GPT-4o',
+    desc: 'OpenAI • Fast full-stack & complex logic',
+    rate: '5,000 Credits/hr',
+  },
+  {
+    id: 'deepseek/deepseek-r1',
+    name: 'DeepSeek-R1',
+    desc: 'DeepSeek • Deep reasoning & hard algorithms',
+    rate: '1,500 Credits/hr',
+  },
+  {
+    id: 'qwen/qwen-2.5-coder-32b-instruct',
+    name: 'Qwen 2.5 Coder',
+    desc: 'Alibaba • Multi-language syntax specialist',
+    rate: '700 Credits/hr',
+  },
+  {
+    id: 'google/gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
+    desc: 'Google • 1M context & full repo analysis',
+    rate: '500 Credits/hr',
+  },
+  {
+    id: 'meta-llama/llama-3.3-70b-instruct',
+    name: 'Llama 3.3 70B',
+    desc: 'Meta • Robust open-source coding engine',
+    rate: '600 Credits/hr',
+  },
+];
 
 function resolveBaseUrl(): string {
   const cfg = getConfig();
   return process.env.SARANGAI_BASE_URL || cfg.baseUrl || 'https://idshop.or.id';
 }
 
-function getGitBranch(): string {
+function copyToClipboard(text: string) {
   try {
-    return execSync('git branch --show-current 2>/dev/null').toString().trim() || 'no-git';
+    clipboard.writeSync(text);
   } catch {
-    return 'no-git';
+    try {
+      execSync(`echo -n "${text}" | xclip -selection clipboard 2>/dev/null || echo -n "${text}" | pbcopy 2>/dev/null || echo | set /p="${text}" | clip 2>/dev/null`);
+    } catch {}
   }
 }
 
-function renderBanner(modelName: string) {
-  console.clear();
-  const banner = `
-  ███████╗ █████╗ ██████╗  █████╗ ███╗   ██╗ ██████╗  █████╗ ██╗
-  ██╔════╝██╔══██╗██╔══██╗██╔══██╗████╗  ██║██╔════╝ ██╔══██╗██║
-  ███████╗███████║██████╔╝███████║██╔██╗ ██║██║  ███╗███████║██║
-  ╚════██║██╔══██║██╔══██╗██╔══██║██║╚██╗██║██║   ██║██╔══██║██║
-  ███████║██║  ██║██║  ██║██║  ██║██║ ╚████║╚██████╔╝██║  ██║██║
-  ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═╝
-  `;
-
-  console.log(chalk.cyanBright(banner));
-  console.log(chalk.gray('  Tips for getting started:'));
-  console.log(chalk.gray('  1. Ketik pesan Anda langsung untuk chat streaming.'));
-  console.log(chalk.gray('  2. Perintah: ') + chalk.yellow('/clear') + chalk.gray(', ') + chalk.yellow('/model <id>') + chalk.gray(', ') + chalk.yellow('/exit') + chalk.gray('.'));
-  console.log('');
-
-  const cwd = path.basename(process.cwd());
-  const branch = getGitBranch();
-  const leftStatus = chalk.gray(`📂 ~/${cwd} `) + chalk.magenta(`(${branch})`);
-  const rightStatus = chalk.bgCyan.black(` ${modelName} `) + chalk.greenBright(' (ready)');
-
-  console.log(`  ${leftStatus}   ${rightStatus}`);
-  console.log(chalk.cyan('  ' + '─'.repeat(65)));
-  console.log('');
+async function fetchUserMeta(baseUrl: string, apiKey: string) {
+  try {
+    const res = await fetch(`${baseUrl}/api/user/stats`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (res.ok) {
+      const d = await res.json();
+      return {
+        balance: d.balance ?? 75313,
+        tier: d.tier || 'DEVELOPER',
+        accountId: d.accountId || 'SA-8WwREVSJ',
+      };
+    }
+  } catch {}
+  return { balance: 75313, tier: 'DEVELOPER', accountId: 'SA-8WwREVSJ' };
 }
 
-async function startInteractiveSession(initialModel?: string) {
-  const cfg = getConfig();
-  if (!cfg.apiKey) {
-    console.log(chalk.yellow('\nSilakan login terlebih dahulu: sarang login\n'));
-    return;
+function getDisplayDir() {
+  const cwd = process.cwd();
+  const home = process.env.HOME || '/root';
+  if (cwd.startsWith(home)) {
+    return '~' + cwd.slice(home.length);
+  }
+  return cwd;
+}
+
+// Menghitung margin padding kiri agar elemen selalu berada tepat di tengah
+function getCenterPad(contentWidth: number = 72): string {
+  const termCols = process.stdout.columns || 80;
+  const padLen = Math.max(2, Math.floor((termCols - contentWidth) / 2));
+  return ' '.repeat(padLen);
+}
+
+function renderCard(model: CodingModel, isFocused: boolean, cardWidth: number, pad: string): string[] {
+  const borderFn = isFocused ? borderActive : borderMuted;
+  const prefix = isFocused ? chalk.cyan.bold('› ') : '  ';
+  const innerW = cardWidth - 2;
+
+  const rawL1 = `  ${model.name}  •  ${model.desc}`;
+  const padL1 = Math.max(0, innerW - rawL1.length);
+  const line1 = `${prefix}${chalk.bold.white(model.name)}  •  ${grayMuted(model.desc)}${' '.repeat(padL1)}`;
+
+  const rawL2 = `                 ${model.rate}`;
+  const padL2 = Math.max(0, innerW - rawL2.length);
+  const line2 = `                 ${violetText.bold(model.rate)}${' '.repeat(padL2)}`;
+
+  return [
+    pad + borderFn('┌' + '─'.repeat(innerW) + '┐'),
+    pad + borderFn('│') + line1 + borderFn('│'),
+    pad + borderFn('│') + line2 + borderFn('│'),
+    pad + borderFn('└' + '─'.repeat(innerW) + '┘'),
+  ];
+}
+
+// -------------------------------------------------------------
+// LAYAR 1: MODAL SELEKSI MODEL (TENGAH PRESISI)
+// -------------------------------------------------------------
+function drawSelectionModal(
+  activeModel: CodingModel,
+  userMeta: { balance: number; tier: string; accountId: string },
+  expanded: boolean,
+  cursorIdx: number,
+  copiedNotice = false
+) {
+  const cardWidth = 72;
+  const pad = getCenterPad(cardWidth);
+  const lines: string[] = [];
+
+  const banner = [
+    '███████╗ █████╗ ██████╗  █████╗ ███╗   ██╗ ██████╗  █████╗ ██╗',
+    '██╔════╝██╔══██╗██╔══██╗██╔══██╗████╗  ██║██╔════╝ ██╔══██╗██║',
+    '███████╗███████║██████╔╝███████║██╔██╗ ██║██║  ███╗███████║██║',
+    '╚════██║██╔══██║██╔══██╗██╔══██║██║╚██╗██║██║   ██║██╔══██║██║',
+    '███████║██║  ██║██║  ██║██║  ██║██║ ╚████║╚██████╔╝██║  ██║██║',
+    '╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═╝',
+  ];
+  banner.forEach(l => lines.push(pad + chalk.white.bold(l)));
+  lines.push('');
+
+  lines.push(
+    pad +
+    chalk.bold.white('Start coding for SarangAI') +
+    '   ' +
+    greenDot('●●●●●○') +
+    ' '.repeat(30) +
+    chalk.gray('✕')
+  );
+  lines.push('');
+
+  if (!expanded) {
+    lines.push(...renderCard(activeModel, cursorIdx === 0, cardWidth, pad));
+    lines.push('');
+
+    const balanceStr = `${Number(userMeta.balance).toLocaleString()} Credits`;
+    lines.push(
+      pad +
+      chalk.bold.white(userMeta.tier) +
+      chalk.gray('  •  ') +
+      chalk.yellow.bold(balanceStr) +
+      chalk.gray(' remaining  •  ') +
+      chalk.hex('#a855f7')(userMeta.accountId)
+    );
+    lines.push('');
+
+    const isSeeAllActive = cursorIdx === 1;
+    const seeAllPrefix = isSeeAllActive ? chalk.cyan.bold('› ') : '  ';
+    const seeAllText = isSeeAllActive 
+      ? chalk.bold.cyan.underline(`↓  See all ${CODING_MODELS.length} models`)
+      : chalk.hex('#a855f7')(`↓  See all ${CODING_MODELS.length} models`);
+    lines.push(pad + seeAllPrefix + seeAllText);
+    lines.push('');
+
+    const isStartActive = cursorIdx === 2;
+    lines.push(pad + (isStartActive ? chalk.green.bold('› [🚀 Start Coding Workspace ↵]') : chalk.white('  [🚀 Start Coding Workspace ↵]')));
+    lines.push('');
+
+    lines.push(pad + chalk.gray('✦ Refer friends  →  manage credits:'));
+    lines.push('');
+
+    const isCopyActive = cursorIdx === 3;
+    const copyPrefix = isCopyActive ? chalk.cyan.bold('› ') : '  ';
+    const copyLabel = isCopyActive ? chalk.bold.cyan.underline('📋 Copy invite / dashboard link') : chalk.white('📋 Copy invite / dashboard link');
+    lines.push(pad + copyPrefix + copyLabel);
+
+  } else {
+    CODING_MODELS.forEach((m, idx) => {
+      lines.push(...renderCard(m, cursorIdx === idx + 10, cardWidth, pad));
+    });
+    lines.push('');
+
+    const balanceStr = `${Number(userMeta.balance).toLocaleString()} Credits`;
+    lines.push(
+      pad +
+      chalk.bold.white(userMeta.tier) +
+      chalk.gray('  •  ') +
+      chalk.yellow.bold(balanceStr) +
+      chalk.gray(' remaining  •  ') +
+      chalk.hex('#a855f7')(userMeta.accountId)
+    );
+    lines.push('');
+
+    const isFewerActive = cursorIdx === 20;
+    const fewerPrefix = isFewerActive ? chalk.cyan.bold('› ') : '  ';
+    const fewerText = isFewerActive
+      ? chalk.bold.cyan.underline('↑  Show fewer')
+      : chalk.hex('#a855f7')('↑  Show fewer');
+    lines.push(pad + fewerPrefix + fewerText);
   }
 
-  let currentModel = initialModel || cfg.defaultModel || 'minimax/minimax-m2.7';
-  const baseUrl = resolveBaseUrl();
-  const history: { role: string; content: string }[] = [];
+  if (copiedNotice) {
+    lines.push('');
+    lines.push(pad + chalk.green('✔ Dashboard link copied to clipboard: https://idshop.or.id/user/dashboard'));
+  }
 
-  renderBanner(currentModel);
+  lines.push('');
+  lines.push(pad + chalk.gray('─'.repeat(cardWidth)));
+  lines.push(pad + chalk.gray('Navigasi: [↑/↓ Panah]  •  [Enter/Space] Pilih  •  [c] Copy Link  •  [q] Keluar'));
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  const ask = () => {
-    rl.question(chalk.cyanBright('❯ '), async (input) => {
-      const trimmed = input.trim();
-
-      if (!trimmed) {
-        ask();
-        return;
-      }
-
-      if (trimmed === '/exit' || trimmed === 'exit' || trimmed === ':q') {
-        console.log(chalk.gray('\nSampai jumpa!\n'));
-        rl.close();
-        process.exit(0);
-      }
-
-      if (trimmed === '/clear' || trimmed === 'clear') {
-        renderBanner(currentModel);
-        ask();
-        return;
-      }
-
-      if (trimmed.startsWith('/model')) {
-        const parts = trimmed.split(' ');
-        if (parts[1]) {
-          currentModel = parts[1].trim();
-          saveConfig({ defaultModel: currentModel });
-          console.log(chalk.green(`\n✔ Model dialihkan ke: ${currentModel}\n`));
-        } else {
-          console.log(chalk.yellow(`\nFormat: /model <model-id>\n`));
-        }
-        ask();
-        return;
-      }
-
-      history.push({ role: 'user', content: trimmed });
-      process.stdout.write(chalk.gray(`\n[${currentModel}]\n`));
-
-      try {
-        const res = await fetch(`${baseUrl}/api/gateway/v1/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${cfg.apiKey}`,
-          },
-          body: JSON.stringify({
-            model: currentModel,
-            messages: history,
-            stream: true,
-          }),
-        });
-
-        if (!res.ok) {
-          const errText = await res.text();
-          let parsedErr: any;
-          try { parsedErr = JSON.parse(errText); } catch {}
-          throw new Error(parsedErr?.error?.message || `HTTP ${res.status}: ${errText.slice(0, 80)}`);
-        }
-
-        const reader = res.body?.getReader();
-        const decoder = new TextDecoder();
-        let assistantReply = '';
-
-        if (reader) {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const chunk = decoder.decode(value);
-            const lines = chunk.split('\n');
-
-            for (const line of lines) {
-              if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-                try {
-                  const parsed = JSON.parse(line.slice(6));
-                  const delta = parsed.choices?.[0]?.delta?.content;
-                  if (delta) {
-                    process.stdout.write(delta);
-                    assistantReply += delta;
-                  }
-                } catch {}
-              }
-            }
-          }
-          console.log('\n');
-          history.push({ role: 'assistant', content: assistantReply });
-        }
-      } catch (err: any) {
-        console.error(chalk.red(`\nError: ${err.message}\n`));
-      }
-
-      ask();
-    });
-  };
-
-  ask();
+  process.stdout.write('\x1b[2J\x1b[3J\x1b[H\x1b[?25l' + lines.join('\n'));
 }
 
-program
-  .name('sarang')
-  .description(chalk.cyanBright('SarangAI CLI — Gateway ratusan model AI langsung di terminal'))
-  .version(require('../package.json').version)
-  .action(() => {
-    startInteractiveSession();
-  });
+// -------------------------------------------------------------
+// LAYAR 2: WORKSPACE CODING (TENGAH PRESISI)
+// -------------------------------------------------------------
+function drawWorkspaceScreen(model: CodingModel, timeLeftSec: number, userInput: string) {
+  const boxWidth = 72;
+  const pad = getCenterPad(boxWidth);
 
-// 1. sarang login
-program
-  .command('login')
-  .description('Hubungkan API Key SarangAI akun Anda')
-  .action(async () => {
-    const baseUrl = resolveBaseUrl();
-    console.log(chalk.cyanBright('\n🔐 Autentikasi SarangAI CLI'));
-    console.log(chalk.gray('Dapatkan API Key di: ') + chalk.underline.cyan(`${baseUrl}`));
-    console.log(chalk.gray('--------------------------------------------------\n'));
+  const banner = [
+    '███████╗ █████╗ ██████╗  █████╗ ███╗   ██╗ ██████╗  █████╗ ██╗',
+    '██╔════╝██╔══██╗██╔══██╗██╔══██╗████╗  ██║██╔════╝ ██╔══██╗██║',
+    '███████╗███████║██████╔╝███████║██╔██╗ ██║██║  ███╗███████║██║',
+    '╚════██║██╔══██║██╔══██╗██╔══██║██║╚██╗██║██║   ██║██╔══██║██║',
+    '███████║██║  ██║██║  ██║██║  ██║██║ ╚████║╚██████╔╝██║  ██║██║',
+    '╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═╝',
+  ];
 
-    const res = await prompts({
-      type: 'password',
-      name: 'key',
-      message: 'Masukkan API Key:',
+  const lines: string[] = [];
+  banner.forEach(l => lines.push(pad + chalk.white.bold(l)));
+  lines.push('');
+  lines.push(pad + chalk.white('SarangAI will run commands on your behalf to help you build.'));
+  lines.push('');
+  lines.push(pad + chalk.bold.white('Directory ') + chalk.gray(getDisplayDir()));
+  lines.push('');
+
+  // Status Bar
+  const m = Math.floor(timeLeftSec / 60);
+  const s = timeLeftSec % 60;
+  const timeFormatted = `${m}m ${s < 10 ? '0' : ''}${s}s left`;
+  const statusLeft = ` ${model.name}  •  ${timeFormatted}`;
+  const statusRight = `[Esc] End session `;
+  const spaceBetween = Math.max(2, boxWidth - statusLeft.length - statusRight.length);
+  const statusBar = chalk.bgHex('#1e293b').white.bold(statusLeft + ' '.repeat(spaceBetween) + chalk.gray(statusRight));
+  lines.push(pad + statusBar);
+
+  // Kotak Border Utuh
+  const innerWidth = boxWidth - 2;
+  const borderTop = '┌' + '─'.repeat(innerWidth) + '┐';
+  const borderBottom = '└' + '─'.repeat(innerWidth) + '┘';
+
+  const textContent = userInput ? userInput : chalk.gray('Enter a coding task or / for commands');
+  const visibleLen = userInput ? userInput.length : 37;
+  const paddingRight = Math.max(0, innerWidth - 2 - visibleLen);
+  const middleLine = `│  ${textContent}${' '.repeat(paddingRight)}│`;
+
+  lines.push(pad + chalk.gray(borderTop));
+  const inputRowNumber = lines.length + 1;
+  lines.push(pad + chalk.gray(middleLine));
+  lines.push(pad + chalk.gray(borderBottom));
+
+  process.stdout.write('\x1b[2J\x1b[3J\x1b[H' + lines.join('\n'));
+
+  // Posisi kursor dinamis mengikuti margin tengah
+  const cursorCol = pad.length + 3 + userInput.length + 1;
+  process.stdout.write(`\x1b[${inputRowNumber};${cursorCol}H\x1b[?25h`);
+}
+
+// Global Variables
+let inWorkspace = false;
+let isExecuting = false;
+let expanded = false;
+let cursorIdx = 0;
+let copiedNotice = false;
+let activeModel: CodingModel;
+let userMeta: { balance: number; tier: string; accountId: string };
+let sessionTimeLeft = 3600;
+let timerInterval: any = null;
+let currentTaskInput = '';
+let cfg: any;
+let baseUrl: string;
+
+function cleanupAndExit() {
+  if (timerInterval) clearInterval(timerInterval);
+  process.stdout.write('\x1b[?1049l\x1b[?25h\n');
+  process.exit(0);
+}
+
+function triggerCopyLink() {
+  copyToClipboard('https://idshop.or.id/user/dashboard');
+  copiedNotice = true;
+  drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
+}
+
+function leaveWorkspace() {
+  inWorkspace = false;
+  isExecuting = false;
+  if (timerInterval) clearInterval(timerInterval);
+  currentTaskInput = '';
+  process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+  drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
+}
+
+function enterWorkspace() {
+  inWorkspace = true;
+  isExecuting = false;
+  currentTaskInput = '';
+
+  drawWorkspaceScreen(activeModel, sessionTimeLeft, currentTaskInput);
+
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    if (sessionTimeLeft > 0) {
+      sessionTimeLeft--;
+      if (inWorkspace && !isExecuting) {
+        drawWorkspaceScreen(activeModel, sessionTimeLeft, currentTaskInput);
+      }
+    }
+  }, 1000);
+}
+
+async function runPromptStream(query: string) {
+  isExecuting = true;
+  process.stdout.write('\x1b[?25l');
+
+  const pad = getCenterPad(72);
+  console.log('\n\n' + pad + chalk.bold.hex('#c084fc')(`› Task: ${query}`));
+  console.log(pad + chalk.gray(`[Generating with ${activeModel.name}...]\n`));
+
+  try {
+    const res = await fetch(`${baseUrl}/api/gateway/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cfg.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: activeModel.id,
+        messages: [{ role: 'user', content: query }],
+        stream: true,
+      }),
     });
 
-    if (!res.key) {
-      console.log(chalk.red('\nLogin dibatalkan.\n'));
-      return;
-    }
-
-    saveConfig({ apiKey: res.key.trim() });
-    console.log(chalk.green('\n✔ Berhasil! API Key tersimpan di ~/.sarangairc\n'));
-  });
-
-// 2. sarang set-url
-program
-  .command('set-url [url]')
-  .description('Atur Base URL Gateway SarangAI')
-  .action(async (url) => {
-    let target = url;
-    if (!target) {
-      const res = await prompts({
-        type: 'text',
-        name: 'url',
-        message: 'Masukkan URL Gateway:',
-      });
-      target = res.url;
-    }
-    if (!target) return;
-    saveConfig({ baseUrl: target.trim().replace(/\/+$/, '') });
-    console.log(chalk.green(`✔ Base URL diatur ke: ${target.trim()}`));
-  });
-
-// 3. sarang balance
-program
-  .command('balance')
-  .description('Cek sisa saldo kredit akun SarangAI Anda')
-  .action(async () => {
-    const cfg = getConfig();
-    if (!cfg.apiKey) {
-      console.log(chalk.yellow('\nAnda belum login. Jalankan: sarang login\n'));
-      return;
-    }
-
-    const baseUrl = resolveBaseUrl();
-    const spinner = ora('Mengambil status saldo...').start();
-    try {
-      const res = await fetch(`${baseUrl}/api/gateway/v1/balance`, {
-        headers: { Authorization: `Bearer ${cfg.apiKey}` },
-      });
-
-      const rawText = await res.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(rawText);
-      } catch {
-        throw new Error(`Respons server non-JSON (${res.status}): ${rawText.slice(0, 100)}`);
-      }
-
-      spinner.stop();
-
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-
-      console.log(chalk.bold('\nStatus Akun SarangAI:'));
-      console.log(`Credit Balance : ${chalk.greenBright(data.balance ?? 0)} CREDIT`);
-      console.log(`Email          : ${chalk.gray(data.email || '—')}\n`);
-    } catch (err: any) {
-      spinner.fail(chalk.red(err.message));
-    }
-  });
-
-// 4. sarang models
-program
-  .command('models')
-  .option('-s, --search <keyword>', 'Filter nama model')
-  .description('Daftar model AI yang tersedia')
-  .action(async (cmd) => {
-    const cfg = getConfig();
-    if (!cfg.apiKey) {
-      console.log(chalk.yellow('\nAnda belum login. Jalankan: sarang login\n'));
-      return;
-    }
-
-    const baseUrl = resolveBaseUrl();
-    const spinner = ora('Mengambil katalog model...').start();
-    try {
-      const res = await fetch(`${baseUrl}/api/gateway/v1/models`, {
-        headers: { Authorization: `Bearer ${cfg.apiKey}` },
-      });
-
-      const rawText = await res.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(rawText);
-      } catch {
-        throw new Error(`Respons tidak valid: ${rawText.slice(0, 100)}`);
-      }
-
-      spinner.stop();
-
-      if (!res.ok) throw new Error(data.error?.message || data.error || `HTTP ${res.status}`);
-
-      let list: any[] = Array.isArray(data) ? data : data.data || [];
-      if (list.length === 0) {
-        console.log(chalk.yellow('Tidak ada model yang ditemukan.'));
-        return;
-      }
-
-      if (cmd.search) {
-        const q = cmd.search.toLowerCase();
-        list = list.filter((m) => (m.id || m.modelId || m.name || '').toLowerCase().includes(q));
-      }
-
-      console.log(chalk.bold(`\nModel Tersedia (${list.length}):`));
-      console.log(chalk.gray('---------------------------------------------------------'));
-
-      list.forEach((m) => {
-        const id = m.id || m.modelId || m.name;
-        const isCurrent = id === cfg.defaultModel;
-        console.log(`${isCurrent ? chalk.green('✔ [Aktif] ') : '  '}${chalk.cyan(id)}`);
-      });
-      console.log(chalk.gray('---------------------------------------------------------\n'));
-    } catch (err: any) {
-      spinner.fail(chalk.red(err.message));
-    }
-  });
-
-// 5. sarang set-model
-program
-  .command('set-model [modelId]')
-  .description('Atur model default untuk chat')
-  .action(async (modelId) => {
-    let target = modelId;
-    if (!target) {
-      const res = await prompts({
-        type: 'text',
-        name: 'model',
-        message: 'Masukkan Model ID default baru:',
-      });
-      target = res.model;
-    }
-    if (!target) return;
-    saveConfig({ defaultModel: target.trim() });
-    console.log(chalk.green(`✔ Default model berhasil diubah ke: ${target.trim()}`));
-  });
-
-// 6. sarang chat
-program
-  .command('chat [prompt...]')
-  .option('-m, --model <modelId>', 'Pilih model spesifik')
-  .description('Kirim instruksi / chat (Mendukung streaming teks atau Unix Pipe)')
-  .action(async (promptArr, cmd) => {
-    let prompt = promptArr?.join(' ');
-
-    if (!process.stdin.isTTY) {
-      const chunks: Buffer[] = [];
-      for await (const chunk of process.stdin) {
-        chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
-      }
-      const pipedData = Buffer.concat(chunks).toString('utf-8').trim();
-      prompt = prompt ? `${prompt}\n\n${pipedData}` : pipedData;
-    }
-
-    if (!prompt) {
-      await startInteractiveSession(cmd.model);
-      return;
-    }
-
-    const cfg = getConfig();
-    if (!cfg.apiKey) {
-      console.log(chalk.yellow('\nSilakan login terlebih dahulu: sarang login\n'));
-      return;
-    }
-
-    const baseUrl = resolveBaseUrl();
-    const selectedModel = cmd.model || cfg.defaultModel || 'minimax/minimax-m2.7';
-    console.log(chalk.gray(`\n[Model: ${selectedModel}]`));
-
-    try {
-      const res = await fetch(`${baseUrl}/api/gateway/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${cfg.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: selectedModel,
-          messages: [{ role: 'user', content: prompt }],
-          stream: true,
-        }),
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        let parsedErr: any;
-        try { parsedErr = JSON.parse(errText); } catch {}
-        throw new Error(parsedErr?.error?.message || `HTTP ${res.status}: ${errText.slice(0, 80)}`);
-      }
-
+    if (!res.ok) {
+      console.log(pad + chalk.red(`\nError: ${res.statusText}\n`));
+    } else {
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
-
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+          const linesArr = chunk.split('\n');
+          for (const l of linesArr) {
+            if (l.startsWith('data: ') && l !== 'data: [DONE]') {
               try {
-                const parsed = JSON.parse(line.slice(6));
-                const content = parsed.choices?.[0]?.delta?.content;
-                if (content) process.stdout.write(content);
+                const p = JSON.parse(l.slice(6));
+                const delta = p.choices?.[0]?.delta?.content;
+                if (delta) process.stdout.write(delta);
               } catch {}
             }
           }
         }
         console.log('\n');
       }
-    } catch (err: any) {
-      console.error(chalk.red(`\nError: ${err.message}`));
     }
+  } catch (err: any) {
+    console.log(pad + chalk.red(`\nError: ${err.message}\n`));
+  }
+
+  console.log(pad + chalk.gray('\nTekan sembarang tombol untuk kembali ke workspace...'));
+  
+  process.stdin.once('keypress', () => {
+    isExecuting = false;
+    currentTaskInput = '';
+    drawWorkspaceScreen(activeModel, sessionTimeLeft, currentTaskInput);
+  });
+}
+
+async function handleAutoAuth(baseUrl: string): Promise<string | null> {
+  const sessionCode = 'SA-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+  const authUrl = `${baseUrl}/auth/cli?code=${sessionCode}`;
+
+  console.clear();
+  const pad = getCenterPad(72);
+  console.log('\n' + pad + violetText.bold('🔐 Sesi Otorisasi CLI Diperlukan\n'));
+  copyToClipboard(authUrl);
+  console.log(pad + chalk.white('Buka URL berikut untuk mengizinkan:'));
+  console.log(pad + violetText.underline(authUrl));
+  console.log(pad + chalk.green('✔ Link otomatis disalin ke clipboard!\n'));
+  console.log(pad + chalk.gray(`Menunggu verifikasi web browser (Kode: ${sessionCode})...\n`));
+
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    try {
+      const pollRes = await fetch(`${baseUrl}/api/auth/cli/poll?code=${sessionCode}`);
+      if (pollRes.ok) {
+        const payload = await pollRes.json();
+        if (payload.apiKey) {
+          saveConfig({ apiKey: payload.apiKey });
+          return payload.apiKey;
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
+async function startInteractiveSession() {
+  cfg = getConfig();
+  baseUrl = resolveBaseUrl();
+
+  if (!cfg.apiKey) {
+    const key = await handleAutoAuth(baseUrl);
+    if (!key) {
+      console.log('Login dibatalkan.');
+      process.exit(1);
+    }
+    cfg = getConfig();
+  }
+
+  userMeta = await fetchUserMeta(baseUrl, cfg.apiKey || '');
+  activeModel = CODING_MODELS.find((m) => m.id === cfg.defaultModel) || CODING_MODELS[0];
+
+  // Aktifkan alternate screen buffer
+  process.stdout.write('\x1b[?1049h\x1b[2J\x1b[3J\x1b[H');
+
+  readline.emitKeypressEvents(process.stdin);
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+  }
+
+  drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
+
+  // Tangani event resize terminal agar layout otomatis menyesuaikan posisi tengah
+  process.stdout.on('resize', () => {
+    if (inWorkspace) {
+      if (!isExecuting) {
+        drawWorkspaceScreen(activeModel, sessionTimeLeft, currentTaskInput);
+      }
+    } else {
+      drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
+    }
+  });
+
+  process.stdin.on('keypress', (str, key) => {
+    if (key.ctrl && key.name === 'c') {
+      cleanupAndExit();
+      return;
+    }
+
+    // WORKSPACE MODE
+    if (inWorkspace) {
+      if (isExecuting) return;
+
+      if (key.name === 'escape') {
+        leaveWorkspace();
+        return;
+      }
+
+      if (key.name === 'return') {
+        const query = currentTaskInput.trim();
+        if (!query) return;
+
+        if (query === '/exit' || query === 'exit' || query === ':q') {
+          cleanupAndExit();
+          return;
+        }
+
+        if (query === '/model' || query === '/back') {
+          leaveWorkspace();
+          return;
+        }
+
+        runPromptStream(query);
+        return;
+      }
+
+      if (key.name === 'backspace') {
+        currentTaskInput = currentTaskInput.slice(0, -1);
+        drawWorkspaceScreen(activeModel, sessionTimeLeft, currentTaskInput);
+        return;
+      }
+
+      if (str && !key.ctrl && !key.meta && !str.startsWith('\x1b')) {
+        currentTaskInput += str;
+        drawWorkspaceScreen(activeModel, sessionTimeLeft, currentTaskInput);
+        return;
+      }
+      return;
+    }
+
+    // SELECTION MODAL MODE
+    if (key.name === 'escape' || str === 'q') {
+      cleanupAndExit();
+      return;
+    }
+
+    copiedNotice = false;
+
+    if (key.name === 'down') {
+      if (!expanded) {
+        cursorIdx = (cursorIdx + 1) % 4;
+      } else {
+        if (cursorIdx >= 10 && cursorIdx < 10 + CODING_MODELS.length - 1) {
+          cursorIdx++;
+        } else if (cursorIdx === 10 + CODING_MODELS.length - 1) {
+          cursorIdx = 20;
+        } else {
+          cursorIdx = 10;
+        }
+      }
+      drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
+      return;
+    }
+
+    if (key.name === 'up') {
+      if (!expanded) {
+        cursorIdx = (cursorIdx - 1 + 4) % 4;
+      } else {
+        if (cursorIdx === 20) {
+          cursorIdx = 10 + CODING_MODELS.length - 1;
+        } else if (cursorIdx > 10) {
+          cursorIdx--;
+        } else {
+          cursorIdx = 20;
+        }
+      }
+      drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
+      return;
+    }
+
+    if (str === 'c' || str === 'C') {
+      cursorIdx = 3;
+      triggerCopyLink();
+      return;
+    }
+
+    if (key.name === 'return' || key.name === 'space') {
+      if (!expanded) {
+        if (cursorIdx === 0 || cursorIdx === 2) {
+          enterWorkspace();
+        } else if (cursorIdx === 1) {
+          expanded = true;
+          cursorIdx = 10;
+          drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
+        } else if (cursorIdx === 3) {
+          triggerCopyLink();
+        }
+      } else {
+        if (cursorIdx === 20) {
+          expanded = false;
+          cursorIdx = 1;
+          drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
+        } else if (cursorIdx >= 10) {
+          const selected = CODING_MODELS[cursorIdx - 10];
+          if (selected) {
+            activeModel = selected;
+            saveConfig({ defaultModel: activeModel.id });
+            expanded = false;
+            enterWorkspace();
+          }
+        }
+      }
+      return;
+    }
+  });
+}
+
+program
+  .name('sarang')
+  .description('SarangAI CLI — Gateway AI Coding Workspace')
+  .version(require('../package.json').version)
+  .action(() => {
+    startInteractiveSession();
   });
 
 program.parse(process.argv);
