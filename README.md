@@ -1,104 +1,68 @@
 # SarangAI CLI
 
-Akses 400+ model AI unggulan (DeepSeek, Claude, GPT, Qwen, Minimax, dsb.) langsung dari terminal Anda melalui SarangAI Gateway.
+Gateway AI Coding Workspace interaktif langsung dari terminal Anda, didukung oleh model-model reasoning & coding terbaik dunia (Anthropic, OpenAI, DeepSeek, Alibaba, Google, Meta).
 
 ---
 
 ## Fitur Utama
 
-- **Streaming Teks Cepat**: Respons AI mengalir secara real-time langsung di terminal.
-- **Katalog 400+ Model**: Jelajahi dan gunakan ratusan varian model AI populer.
-- **Pencarian Cepat**: Filter model berdasarkan nama, provider, atau model gratis.
-- **Dukungan Unix Piping**: Teruskan output perintah bash/kode program langsung ke AI.
-- **Manajemen Saldo**: Cek status kredit akun langsung lewat terminal.
+- **Interactive Terminal Workspace (TUI)**: Antarmuka terminal interaktif modern berbasis full-screen alternate buffer tanpa flicker.
+- **Top Coding Models (1 Brand = 1 Flagship)**: Dikurasi khusus untuk programming, arsitektur sistem, dan debugging mendalam:
+  - Claude 3.7 Sonnet (Anthropic) - Architecture & Agentic coding
+  - GPT-4o (OpenAI) - Fast full-stack & complex logic
+  - DeepSeek-R1 (DeepSeek) - Deep reasoning & hard algorithms
+  - Qwen 2.5 Coder 32B (Alibaba) - Multi-language syntax specialist
+  - Gemini 2.5 Flash (Google) - 1M context & full repo analysis
+  - Llama 3.3 70B (Meta) - Robust open-source coding engine
+- **Real-Time Streaming**: Output kode dan respons AI mengalir seketika (zero-latency stream).
+- **Auto-Auth via Browser**: Login cepat dan aman tanpa perlu input API Key manual.
+- **Credit & Tier Monitoring**: Pantau sisa saldo credit secara live langsung di dalam terminal.
 
 ---
 
 ## Instalasi
 
-Instal paket secara global menggunakan npm:
+Pastikan Node.js (>= 18) telah terpasang, lalu instal paket secara global:
 
-```bash
-npm install -g sarangai-cli
-```
+    npm install -g sarangai-cli@latest
 
 ---
 
-## Panduan Penggunaan
+## Memulai Workspace Interaktif
 
-### 1. Autentikasi
-Dapatkan API Key dari dashboard akun SarangAI Anda, lalu hubungkan ke CLI:
+Cukup jalankan satu perintah:
 
-```bash
-sarang login
-```
+    sarang
 
-API Key akan disimpan di berkas konfigurasi lokal `~/.sarangairc`.
+Terminal akan otomatis menampilkan modal seleksi model coding, ringkasan saldo akun, dan opsi masuk ke ruang kerja (Workspace).
 
-### 2. Cek Saldo Kredit
-Lihat sisa saldo kredit dan status akun:
+### Navigasi Keyboard:
+- [↑/↓] (Panah) : Navigasi antar opsi dan pilihan model.
+- [Enter / Space] : Konfirmasi pilihan / Masuk ke Workspace.
+- [c] : Salin tautan dashboard referal ke clipboard.
+- [Esc] : Mengakhiri sesi aktif di Workspace dan kembali ke menu seleksi.
+- [q] : Keluar dari SarangAI CLI.
 
-```bash
-sarang balance
-```
+---
 
-### 3. Jelajahi dan Filter Model
-Melihat seluruh model yang tersedia:
+## Autentikasi Otomatis
 
-```bash
-sarang models
-```
-
-Menyaring model berdasarkan kata kunci:
-
-```bash
-sarang models -s deepseek
-sarang models -s claude
-sarang models -s free
-```
-
-### 4. Ganti Default Model
-Tentukan model yang selalu digunakan secara otomatis:
-
-```bash
-sarang set-model minimax/minimax-m2.7
-```
-
-### 5. Chat & Streaming
-Mengirim prompt langsung:
-
-```bash
-sarang chat "Jelaskan konsep index di database PostgreSQL."
-```
-
-Menggunakan model tertentu tanpa mengubah default:
-
-```bash
-sarang chat -m anthropic/claude-sonnet-4 "Buatkan regex validasi nomor telepon Indonesia."
-```
-
-### 6. Integrasi Unix Piping
-Membaca input langsung dari terminal atau berkas kode:
-
-```bash
-cat main.py | sarang chat "Review potensi bug dan tingkatkan performa kode ini."
-git diff | sarang chat "Buatkan pesan commit yang ringkas berdasarkan perubahan ini."
-```
+Jika pertama kali menggunakan CLI:
+1. Jalankan `sarang`.
+2. CLI akan mengenerate tautan otorisasi unik dan otomatis menyalinnya ke clipboard.
+3. Buka tautan tersebut di browser untuk mengizinkan sesi.
+4. Terminal akan otomatis mendeteksi sesi dan menyimpan token ke `~/.sarangairc`.
 
 ---
 
 ## Konfigurasi Gateway
 
-Secara default, CLI membaca konfigurasi dari `~/.sarangairc` atau environment variable `SARANGAI_BASE_URL`.
+Secara default, CLI terhubung ke `[https://idshop.or.id](https://idshop.or.id)`. Jika Anda menggunakan custom gateway atau development server lokal:
 
-Untuk gateway self-hosted atau pengujian lokal:
-
-```bash
-export SARANGAI_BASE_URL="http://localhost:3001"
-```
+    export SARANGAI_BASE_URL="http://localhost:3001"
 
 ---
 
 ## Lisensi
 
-MIT
+MIT License (c) SarangAI
