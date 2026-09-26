@@ -1,605 +1,349 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import readline from 'readline';
-import { execSync } from 'child_process';
-import crypto from 'crypto';
-import clipboard from 'clipboardy';
-import { getConfig, saveConfig } from './config';
+import { LOCKED_CODING_MODELS, resolveModel, findModel, MODEL_ALIAS_LIST, CodingModel } from './constants';
+import { ensureAuthenticated } from './core/auth';
+import { runAutonomousAgent, AgentRunResult } from './core/workspace';
+import { createTui, TerminalTui } from './ui/tui';
+import { HistoryTurn, summarizeResult, truncateOnLineBoundary } from './core/memory';
+import type { UserStats } from './ui/banner';
 
 const program = new Command();
 
-const borderActive = chalk.hex('#a855f7');
-const borderMuted = chalk.hex('#334155');
-const violetText = chalk.hex('#c084fc');
-const greenDot = chalk.hex('#4ade80');
-const grayMuted = chalk.hex('#94a3b8');
+program
+  .name('sarang')
+  .description('SarangAI Autonomous Coding Agent CLI')
+  .version('1.1.0');
 
-export interface CodingModel {
-  id: string;
-  name: string;
-  desc: string;
-  rate: string;
-}
+// ------------------------------------------------------------------ helpers
 
-export const CODING_MODELS: CodingModel[] = [
-  {
-    id: 'anthropic/claude-3.7-sonnet',
-    name: 'Claude 3.7 Sonnet',
-    desc: 'Anthropic • Best coding & agentic workflow',
-    rate: '12,000 Credits/hr',
-  },
-  {
-    id: 'openai/gpt-4o',
-    name: 'GPT-4o',
-    desc: 'OpenAI • Fast full-stack & complex logic',
-    rate: '5,000 Credits/hr',
-  },
-  {
-    id: 'deepseek/deepseek-r1',
-    name: 'DeepSeek-R1',
-    desc: 'DeepSeek • Deep reasoning & hard algorithms',
-    rate: '1,500 Credits/hr',
-  },
-  {
-    id: 'qwen/qwen-2.5-coder-32b-instruct',
-    name: 'Qwen 2.5 Coder',
-    desc: 'Alibaba • Multi-language syntax specialist',
-    rate: '700 Credits/hr',
-  },
-  {
-    id: 'google/gemini-2.5-flash',
-    name: 'Gemini 2.5 Flash',
-    desc: 'Google • 1M context & full repo analysis',
-    rate: '500 Credits/hr',
-  },
-  {
-    id: 'meta-llama/llama-3.3-70b-instruct',
-    name: 'Llama 3.3 70B',
-    desc: 'Meta • Robust open-source coding engine',
-    rate: '600 Credits/hr',
-  },
-];
-
-function resolveBaseUrl(): string {
-  const cfg = getConfig();
-  return process.env.SARANGAI_BASE_URL || cfg.baseUrl || 'https://idshop.or.id';
-}
-
-function copyToClipboard(text: string) {
+async function refreshStats(): Promise<UserStats | null> {
   try {
-    clipboard.writeSync(text);
+    const { stats } = await ensureAuthenticated();
+    return stats;
   } catch {
-    try {
-      execSync(`echo -n "${text}" | xclip -selection clipboard 2>/dev/null || echo -n "${text}" | pbcopy 2>/dev/null || echo | set /p="${text}" | clip 2>/dev/null`);
-    } catch {}
+    return null;
   }
 }
 
-async function fetchUserMeta(baseUrl: string, apiKey: string) {
-  try {
-    const res = await fetch(`${baseUrl}/api/user/stats`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (res.ok) {
-      const d = await res.json();
-      return {
-        balance: d.balance ?? 75313,
-        tier: d.tier || 'DEVELOPER',
-        accountId: d.accountId || 'SA-8WwREVSJ',
-      };
+function renderResultLines(result: AgentRunResult, model: CodingModel): string[] {
+  const lines: string[] = [];    lines.push(chalk.bold.hex('#a78bfa')(`✔ [${model.name}] Work Summary & Fixes:`));
+
+  if (result.writtenFiles.length > 0) {
+    lines.push('');
+    lines.push(chalk.bold.green('📁 Files Written/Updated:'));
+    for (const f of result.writtenFiles) {
+      const mark = f.success ? chalk.green('✔') : chalk.red('✖');
+      lines.push(`  ${mark} ${chalk.white.bold(f.path)}`);
     }
-  } catch {}
-  return { balance: 75313, tier: 'DEVELOPER', accountId: 'SA-8WwREVSJ' };
-}
-
-function getDisplayDir() {
-  const cwd = process.cwd();
-  const home = process.env.HOME || '/root';
-  if (cwd.startsWith(home)) {
-    return '~' + cwd.slice(home.length);
   }
-  return cwd;
+
+  if (result.editedFiles.length > 0) {
+    lines.push('');
+    lines.push(chalk.bold.green('✏️  Files Edited (str_replace):'));
+    for (const f of result.editedFiles) {
+      const mark = f.success ? chalk.green('✔') : chalk.red('✖');
+      lines.push(`  ${mark} ${chalk.white.bold(f.path)}`);
+    }
+  }
+
+  if (result.explanation) {
+    lines.push('');
+    lines.push(...result.explanation.split('\n'));
+  }
+  return lines;
 }
 
-// Menghitung margin padding kiri agar elemen selalu berada tepat di tengah
-function getCenterPad(contentWidth: number = 72): string {
-  const termCols = process.stdout.columns || 80;
-  const padLen = Math.max(2, Math.floor((termCols - contentWidth) / 2));
-  return ' '.repeat(padLen);
+function modelListLines(active: CodingModel): string[] {
+  const lines = [chalk.yellow('Available Models (Locked):')];
+  for (const m of Object.values(LOCKED_CODING_MODELS)) {
+    const mark = m.alias === active.alias ? chalk.green('●') : chalk.gray('○');
+    lines.push(`  ${mark} ${chalk.hex('#a78bfa')(m.alias.padEnd(10))} ${m.name.padEnd(22)} [${m.role}]`);
+  }
+  return lines;
 }
 
-function renderCard(model: CodingModel, isFocused: boolean, cardWidth: number, pad: string): string[] {
-  const borderFn = isFocused ? borderActive : borderMuted;
-  const prefix = isFocused ? chalk.cyan.bold('› ') : '  ';
-  const innerW = cardWidth - 2;
-
-  const rawL1 = `  ${model.name}  •  ${model.desc}`;
-  const padL1 = Math.max(0, innerW - rawL1.length);
-  const line1 = `${prefix}${chalk.bold.white(model.name)}  •  ${grayMuted(model.desc)}${' '.repeat(padL1)}`;
-
-  const rawL2 = `                 ${model.rate}`;
-  const padL2 = Math.max(0, innerW - rawL2.length);
-  const line2 = `                 ${violetText.bold(model.rate)}${' '.repeat(padL2)}`;
-
-  return [
-    pad + borderFn('┌' + '─'.repeat(innerW) + '┐'),
-    pad + borderFn('│') + line1 + borderFn('│'),
-    pad + borderFn('│') + line2 + borderFn('│'),
-    pad + borderFn('└' + '─'.repeat(innerW) + '┘'),
-  ];
-}
-
-// -------------------------------------------------------------
-// LAYAR 1: MODAL SELEKSI MODEL (TENGAH PRESISI)
-// -------------------------------------------------------------
-function drawSelectionModal(
-  activeModel: CodingModel,
-  userMeta: { balance: number; tier: string; accountId: string },
-  expanded: boolean,
-  cursorIdx: number,
-  copiedNotice = false
-) {
-  const cardWidth = 72;
-  const pad = getCenterPad(cardWidth);
-  const lines: string[] = [];
-
-  const banner = [
-    '███████╗ █████╗ ██████╗  █████╗ ███╗   ██╗ ██████╗  █████╗ ██╗',
-    '██╔════╝██╔══██╗██╔══██╗██╔══██╗████╗  ██║██╔════╝ ██╔══██╗██║',
-    '███████╗███████║██████╔╝███████║██╔██╗ ██║██║  ███╗███████║██║',
-    '╚════██║██╔══██║██╔══██╗██╔══██║██║╚██╗██║██║   ██║██╔══██║██║',
-    '███████║██║  ██║██║  ██║██║  ██║██║ ╚████║╚██████╔╝██║  ██║██║',
-    '╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═╝',
-  ];
-  banner.forEach(l => lines.push(pad + chalk.white.bold(l)));
-  lines.push('');
-
-  lines.push(
-    pad +
-    chalk.bold.white('Start coding for SarangAI') +
-    '   ' +
-    greenDot('●●●●●○') +
-    ' '.repeat(30) +
-    chalk.gray('✕')
+/** Baris error untuk alias /model yang tidak dikenal — tanpa fallback diam-diam. */
+function invalidModelLine(input: string): string {
+  return chalk.red(
+    `✖ Model '${input}' not found. Available: ${MODEL_ALIAS_LIST}.`,
   );
-  lines.push('');
-
-  if (!expanded) {
-    lines.push(...renderCard(activeModel, cursorIdx === 0, cardWidth, pad));
-    lines.push('');
-
-    const balanceStr = `${Number(userMeta.balance).toLocaleString()} Credits`;
-    lines.push(
-      pad +
-      chalk.bold.white(userMeta.tier) +
-      chalk.gray('  •  ') +
-      chalk.yellow.bold(balanceStr) +
-      chalk.gray(' remaining  •  ') +
-      chalk.hex('#a855f7')(userMeta.accountId)
-    );
-    lines.push('');
-
-    const isSeeAllActive = cursorIdx === 1;
-    const seeAllPrefix = isSeeAllActive ? chalk.cyan.bold('› ') : '  ';
-    const seeAllText = isSeeAllActive 
-      ? chalk.bold.cyan.underline(`↓  See all ${CODING_MODELS.length} models`)
-      : chalk.hex('#a855f7')(`↓  See all ${CODING_MODELS.length} models`);
-    lines.push(pad + seeAllPrefix + seeAllText);
-    lines.push('');
-
-    const isStartActive = cursorIdx === 2;
-    lines.push(pad + (isStartActive ? chalk.green.bold('› [🚀 Start Coding Workspace ↵]') : chalk.white('  [🚀 Start Coding Workspace ↵]')));
-    lines.push('');
-
-    lines.push(pad + chalk.gray('✦ Refer friends  →  manage credits:'));
-    lines.push('');
-
-    const isCopyActive = cursorIdx === 3;
-    const copyPrefix = isCopyActive ? chalk.cyan.bold('› ') : '  ';
-    const copyLabel = isCopyActive ? chalk.bold.cyan.underline('📋 Copy invite / dashboard link') : chalk.white('📋 Copy invite / dashboard link');
-    lines.push(pad + copyPrefix + copyLabel);
-
-  } else {
-    CODING_MODELS.forEach((m, idx) => {
-      lines.push(...renderCard(m, cursorIdx === idx + 10, cardWidth, pad));
-    });
-    lines.push('');
-
-    const balanceStr = `${Number(userMeta.balance).toLocaleString()} Credits`;
-    lines.push(
-      pad +
-      chalk.bold.white(userMeta.tier) +
-      chalk.gray('  •  ') +
-      chalk.yellow.bold(balanceStr) +
-      chalk.gray(' remaining  •  ') +
-      chalk.hex('#a855f7')(userMeta.accountId)
-    );
-    lines.push('');
-
-    const isFewerActive = cursorIdx === 20;
-    const fewerPrefix = isFewerActive ? chalk.cyan.bold('› ') : '  ';
-    const fewerText = isFewerActive
-      ? chalk.bold.cyan.underline('↑  Show fewer')
-      : chalk.hex('#a855f7')('↑  Show fewer');
-    lines.push(pad + fewerPrefix + fewerText);
-  }
-
-  if (copiedNotice) {
-    lines.push('');
-    lines.push(pad + chalk.green('✔ Dashboard link copied to clipboard: https://idshop.or.id/user/dashboard'));
-  }
-
-  lines.push('');
-  lines.push(pad + chalk.gray('─'.repeat(cardWidth)));
-  lines.push(pad + chalk.gray('Navigasi: [↑/↓ Panah]  •  [Enter/Space] Pilih  •  [c] Copy Link  •  [q] Keluar'));
-
-  process.stdout.write('\x1b[2J\x1b[3J\x1b[H\x1b[?25l' + lines.join('\n'));
 }
 
-// -------------------------------------------------------------
-// LAYAR 2: WORKSPACE CODING (TENGAH PRESISI)
-// -------------------------------------------------------------
-function drawWorkspaceScreen(model: CodingModel, timeLeftSec: number, userInput: string) {
-  const boxWidth = 72;
-  const pad = getCenterPad(boxWidth);
-
-  const banner = [
-    '███████╗ █████╗ ██████╗  █████╗ ███╗   ██╗ ██████╗  █████╗ ██╗',
-    '██╔════╝██╔══██╗██╔══██╗██╔══██╗████╗  ██║██╔════╝ ██╔══██╗██║',
-    '███████╗███████║██████╔╝███████║██╔██╗ ██║██║  ███╗███████║██║',
-    '╚════██║██╔══██║██╔══██╗██╔══██║██║╚██╗██║██║   ██║██╔══██║██║',
-    '███████║██║  ██║██║  ██║██║  ██║██║ ╚████║╚██████╔╝██║  ██║██║',
-    '╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═╝',
-  ];
-
-  const lines: string[] = [];
-  banner.forEach(l => lines.push(pad + chalk.white.bold(l)));
-  lines.push('');
-  lines.push(pad + chalk.white('SarangAI will run commands on your behalf to help you build.'));
-  lines.push('');
-  lines.push(pad + chalk.bold.white('Directory ') + chalk.gray(getDisplayDir()));
-  lines.push('');
-
-  // Status Bar
-  const m = Math.floor(timeLeftSec / 60);
-  const s = timeLeftSec % 60;
-  const timeFormatted = `${m}m ${s < 10 ? '0' : ''}${s}s left`;
-  const statusLeft = ` ${model.name}  •  ${timeFormatted}`;
-  const statusRight = `[Esc] End session `;
-  const spaceBetween = Math.max(2, boxWidth - statusLeft.length - statusRight.length);
-  const statusBar = chalk.bgHex('#1e293b').white.bold(statusLeft + ' '.repeat(spaceBetween) + chalk.gray(statusRight));
-  lines.push(pad + statusBar);
-
-  // Kotak Border Utuh
-  const innerWidth = boxWidth - 2;
-  const borderTop = '┌' + '─'.repeat(innerWidth) + '┐';
-  const borderBottom = '└' + '─'.repeat(innerWidth) + '┘';
-
-  const textContent = userInput ? userInput : chalk.gray('Enter a coding task or / for commands');
-  const visibleLen = userInput ? userInput.length : 37;
-  const paddingRight = Math.max(0, innerWidth - 2 - visibleLen);
-  const middleLine = `│  ${textContent}${' '.repeat(paddingRight)}│`;
-
-  lines.push(pad + chalk.gray(borderTop));
-  const inputRowNumber = lines.length + 1;
-  lines.push(pad + chalk.gray(middleLine));
-  lines.push(pad + chalk.gray(borderBottom));
-
-  process.stdout.write('\x1b[2J\x1b[3J\x1b[H' + lines.join('\n'));
-
-  // Posisi kursor dinamis mengikuti margin tengah
-  const cursorCol = pad.length + 3 + userInput.length + 1;
-  process.stdout.write(`\x1b[${inputRowNumber};${cursorCol}H\x1b[?25h`);
+/** Terapkan model baru ke sesi + perbarui header TUI. */
+function applyModel(session: Session, next: CodingModel): string {
+  session.model = next;
+  session.tui?.setHeader(session.stats, next);
+  return chalk.green(`✔ Switched to: ${next.name}`);
 }
 
-// Global Variables
-let inWorkspace = false;
-let isExecuting = false;
-let expanded = false;
-let cursorIdx = 0;
-let copiedNotice = false;
-let activeModel: CodingModel;
-let userMeta: { balance: number; tier: string; accountId: string };
-let sessionTimeLeft = 3600;
-let timerInterval: any = null;
-let currentTaskInput = '';
-let cfg: any;
-let baseUrl: string;
-
-function cleanupAndExit() {
-  if (timerInterval) clearInterval(timerInterval);
-  process.stdout.write('\x1b[?1049l\x1b[?25h\n');
+function exitCleanly(): never {
+  console.log(chalk.gray('\nGoodbye! Workspace closed.\n'));
   process.exit(0);
 }
 
-function triggerCopyLink() {
-  copyToClipboard('https://idshop.or.id/user/dashboard');
-  copiedNotice = true;
-  drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
+// -------------------------------------------------------------- session state
+
+interface Session {
+  tui: TerminalTui | null;
+  stats: UserStats | null;
+  model: CodingModel;
+  busy: boolean;
+  queue: string[];
+  /** Memori percakapan in-memory sesi berjalan (multi-giliran). */
+  history: HistoryTurn[];
 }
 
-function leaveWorkspace() {
-  inWorkspace = false;
-  isExecuting = false;
-  if (timerInterval) clearInterval(timerInterval);
-  currentTaskInput = '';
-  process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
-  drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
-}
+async function executeTask(session: Session, input: string): Promise<void> {
+  const { tui, model } = session;
+  const startedAt = Date.now();
 
-function enterWorkspace() {
-  inWorkspace = true;
-  isExecuting = false;
-  currentTaskInput = '';
-
-  drawWorkspaceScreen(activeModel, sessionTimeLeft, currentTaskInput);
-
-  if (timerInterval) clearInterval(timerInterval);
-  timerInterval = setInterval(() => {
-    if (sessionTimeLeft > 0) {
-      sessionTimeLeft--;
-      if (inWorkspace && !isExecuting) {
-        drawWorkspaceScreen(activeModel, sessionTimeLeft, currentTaskInput);
-      }
-    }
-  }, 1000);
-}
-
-async function runPromptStream(query: string) {
-  isExecuting = true;
-  process.stdout.write('\x1b[?25l');
-
-  const pad = getCenterPad(72);
-  console.log('\n\n' + pad + chalk.bold.hex('#c084fc')(`› Task: ${query}`));
-  console.log(pad + chalk.gray(`[Generating with ${activeModel.name}...]\n`));
+  session.busy = true;
+  tui?.setStatus('busy', `[${model.name}] Analyzing requirements & designing solution...`, startedAt);
 
   try {
-    const res = await fetch(`${baseUrl}/api/gateway/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${cfg.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: activeModel.id,
-        messages: [{ role: 'user', content: query }],
-        stream: true,
-      }),
+    const result = await runAutonomousAgent({
+      model,
+      userPrompt: input,
+      history: session.history,
+      onStatus: (label) => tui?.setStatus('busy', label, startedAt),
     });
 
-    if (!res.ok) {
-      console.log(pad + chalk.red(`\nError: ${res.statusText}\n`));
+    // Catat giliran ini ke memori sesi (ringkasan ketat, bukan respons mentah).
+    session.history.push({
+      user: input,
+      summary: summarizeResult(result.explanation, result.writtenFiles, result.editedFiles),
+    });
+
+    const lines = renderResultLines(result, model);
+    if (tui) {
+      tui.appendLines(lines);
+      tui.setStatus('info', `[${model.name}] Done — ${result.writtenFiles.length} file(s) written`);
+      setTimeout(() => {
+        if (tui.isActive && !session.busy) tui.setStatus('idle', '');
+      }, 2500);
     } else {
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value);
-          const linesArr = chunk.split('\n');
-          for (const l of linesArr) {
-            if (l.startsWith('data: ') && l !== 'data: [DONE]') {
-              try {
-                const p = JSON.parse(l.slice(6));
-                const delta = p.choices?.[0]?.delta?.content;
-                if (delta) process.stdout.write(delta);
-              } catch {}
-            }
-          }
-        }
-        console.log('\n');
-      }
+      console.log(lines.join('\n'));
+    }
+
+    // Saldo real-time: refresh header setelah setiap tugas.
+    const fresh = await refreshStats();
+    if (fresh) {
+      session.stats = fresh;
+      tui?.setHeader(fresh, session.model);
     }
   } catch (err: any) {
-    console.log(pad + chalk.red(`\nError: ${err.message}\n`));
-  }
-
-  console.log(pad + chalk.gray('\nTekan sembarang tombol untuk kembali ke workspace...'));
-  
-  process.stdin.once('keypress', () => {
-    isExecuting = false;
-    currentTaskInput = '';
-    drawWorkspaceScreen(activeModel, sessionTimeLeft, currentTaskInput);
-  });
-}
-
-async function handleAutoAuth(baseUrl: string): Promise<string | null> {
-  const sessionCode = 'SA-' + crypto.randomBytes(4).toString('hex').toUpperCase();
-  const authUrl = `${baseUrl}/auth/cli?code=${sessionCode}`;
-
-  console.clear();
-  const pad = getCenterPad(72);
-  console.log('\n' + pad + violetText.bold('🔐 Sesi Otorisasi CLI Diperlukan\n'));
-  copyToClipboard(authUrl);
-  console.log(pad + chalk.white('Buka URL berikut untuk mengizinkan:'));
-  console.log(pad + violetText.underline(authUrl));
-  console.log(pad + chalk.green('✔ Link otomatis disalin ke clipboard!\n'));
-  console.log(pad + chalk.gray(`Menunggu verifikasi web browser (Kode: ${sessionCode})...\n`));
-
-  for (let i = 0; i < 60; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
-    try {
-      const pollRes = await fetch(`${baseUrl}/api/auth/cli/poll?code=${sessionCode}`);
-      if (pollRes.ok) {
-        const payload = await pollRes.json();
-        if (payload.apiKey) {
-          saveConfig({ apiKey: payload.apiKey });
-          return payload.apiKey;
-        }
-      }
-    } catch {}
-  }
-  return null;
-}
-
-async function startInteractiveSession() {
-  cfg = getConfig();
-  baseUrl = resolveBaseUrl();
-
-  if (!cfg.apiKey) {
-    const key = await handleAutoAuth(baseUrl);
-    if (!key) {
-      console.log('Login dibatalkan.');
-      process.exit(1);
-    }
-    cfg = getConfig();
-  }
-
-  userMeta = await fetchUserMeta(baseUrl, cfg.apiKey || '');
-  activeModel = CODING_MODELS.find((m) => m.id === cfg.defaultModel) || CODING_MODELS[0];
-
-  // Aktifkan alternate screen buffer
-  process.stdout.write('\x1b[?1049h\x1b[2J\x1b[3J\x1b[H');
-
-  readline.emitKeypressEvents(process.stdin);
-  if (process.stdin.isTTY) {
-    process.stdin.setRawMode(true);
-  }
-
-  drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
-
-  // Tangani event resize terminal agar layout otomatis menyesuaikan posisi tengah
-  process.stdout.on('resize', () => {
-    if (inWorkspace) {
-      if (!isExecuting) {
-        drawWorkspaceScreen(activeModel, sessionTimeLeft, currentTaskInput);
-      }
+    const msg = `✖ Error: ${err?.message ?? err}`;
+    if (tui) {
+      tui.appendLines([chalk.red(msg)]);
     } else {
-      drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
+      console.error(chalk.red(msg));
     }
+  } finally {
+    session.busy = false;
+    tui?.setStatus('idle', '');
+  }
+}
+
+/**
+ * Satu pintu untuk SEMUA input (TUI maupun fallback). Mengembalikan 'exit'
+ * bila user meminta keluar, antrean tugas ditangani oleh session.queue.
+ */
+async function processInput(session: Session, raw: string): Promise<'exit' | 'handled'> {
+  const input = raw.trim();
+  if (!input) return 'handled';
+  const { tui } = session;
+
+  const lower = input.toLowerCase();
+  if (['exit', 'quit', '/exit', '/quit'].includes(lower)) {
+    tui?.close();
+    exitCleanly();
+  }
+
+  if (input === '/clear') {
+    tui?.clearContent();
+    // /clear also forgets the conversation: start from a clean context.
+    session.history = [];
+    const cleared = chalk.green('Session memory cleared.');
+    if (tui) tui.appendLines([cleared]);
+    else console.log(cleared);
+    void refreshStats().then((fresh) => {
+      if (fresh) {
+        session.stats = fresh;
+        tui?.setHeader(fresh, session.model);
+      }
+    });
+    return 'handled';
+  }
+
+  if (input.startsWith('/model') || input.startsWith('/switch')) {
+    const parts = input.split(/\s+/);
+    const arg = parts.length > 1 ? parts[1]!.trim() : '';
+
+    if (arg) {
+      // Argumen eksplisit: validasi ketat — tidak ada fallback diam-diam.
+      const found = findModel(arg);
+      if (!found) {
+        const line = chalk.red(
+          `✖ Model '${arg}' not found. Available: ${MODEL_ALIAS_LIST}.`,
+        );
+        if (tui) tui.appendLines([line]);
+        else console.log(line);
+      } else {
+        const line = applyModel(session, found);
+        if (tui) tui.appendLines([line]);
+        else console.log(line);
+      }
+    } else if (tui) {
+      // /model tanpa argumen: buka kembali selector interaktif (mode session).
+      tui.openModelMenu('session', session.model.alias);
+    } else {
+      const lines = modelListLines(session.model);
+      console.log(lines.join('\n'));
+    }
+    return 'handled';
+  }
+
+  // Tugas agen: antre bila masih ada yang berjalan (input tidak pernah mati).
+  if (session.busy) {
+    session.queue.push(input);
+    const line = chalk.gray(`⏳ Added to queue (position ${session.queue.length}).`);
+    if (tui) tui.appendLines([line]);
+    else console.log(line);
+    return 'handled';
+  }
+
+  await executeTask(session, input);
+
+  // Lanjutkan antrean tugas berikutnya (REPL tetap hidup).
+  while (session.queue.length > 0) {
+    const next = session.queue.shift();
+    if (next) await executeTask(session, next);
+  }
+  return 'handled';
+}
+
+// -------------------------------------------------------------------- TUI mode
+
+async function startWorkspace(modelAlias = 'glm', initialPrompt?: string): Promise<void> {
+  let stats: UserStats | null = null;
+  try {
+    ({ stats } = await ensureAuthenticated());
+  } catch (err: any) {
+    console.error(chalk.red(`✖ ${err.message}`));
+    process.exit(1);
+  }
+
+  const session: Session = {
+    tui: null,
+    stats,
+    model: resolveModel(modelAlias),
+    busy: false,
+    queue: [],
+    history: [],
+  };
+
+  const tui = createTui(
+    {
+      onSubmit: (text) => void processInput(session, text),
+      onExit: () => exitCleanly(),
+      onModelPick: (index) => {
+        const models = Object.values(LOCKED_CODING_MODELS);
+        const next = models[index];
+        if (!next) return;
+        const line = applyModel(session, next);
+        if (tui.isStartupSelection) {
+          // Startup transition: short status line, then the input box activates.
+          tui.appendLines([
+            chalk.green(`✔ Active model: ${next.name} (${next.role})`),
+          ]);
+        } else {
+          tui.appendLines([line]);
+        }
+      },
+    },
+    { stats, model: session.model },
+  );
+  session.tui = tui;
+
+  if (tui) {
+    tui.start();
+
+    // ---- STARTUP FLOW: pilih model DULU sebelum prompt chat aktif.
+    // Prompt awal via CLI (-m / argumen) atau non-interaktif: lewati selector.
+    const skipSelector = Boolean(initialPrompt?.trim()) || !process.stdin.isTTY;
+    if (!skipSelector) {
+      tui.openModelMenu('startup', session.model.alias);
+    }
+
+    // Prompt awal via CLI (sarang run "buat crud express") langsung dieksekusi.
+    if (initialPrompt && initialPrompt.trim()) {
+      void processInput(session, initialPrompt.trim());
+    }
+    // REPL hidup selamanya di dalam TUI — tidak ada jalur exit otomatis.
+    return;
+  }
+
+  // -------------------------------------------------- fallback non-TTY (piped/CI)
+  //
+  // SEMUA baris dari stdin diproses BERURUTAN via antrean — tidak ada baris
+  // yang terbuang saat tugas berjalan, dan EOF menunggu antrean selesai.
+  const rl = readline.createInterface({ input: process.stdin, terminal: false });
+  const banner = await import('./ui/banner');
+  console.log(banner.bannerLines(stats).join('\n'));
+  console.log(chalk.gray(`[Agent: ${chalk.bold.hex('#a78bfa')(session.model.name)} — ${session.model.role}]`));
+  console.log(chalk.gray('Enter your coding task.  /model: switch model  /clear: clear context  exit: quit\n'));
+
+  const pending: string[] = [];
+  let draining = false;
+  let inputClosed = false;
+
+  const drain = async (): Promise<void> => {
+    if (draining) return;
+    draining = true;
+    while (pending.length > 0) {
+      const line = pending.shift()!;
+      if (!line) continue;
+      await processInput(session, line);
+    }
+    draining = false;
+    if (inputClosed) exitCleanly();
+    // Interaktif tanpa TTY (mis. some dumb terminals): tampilkan prompt standby.
+    process.stdout.write(chalk.bold.hex('#c084fc')(`sarang(${session.model.alias})> `));
+  };
+
+  rl.on('line', (line) => {
+    pending.push(line.trim());
+    void drain();
   });
 
-  process.stdin.on('keypress', (str, key) => {
-    if (key.ctrl && key.name === 'c') {
-      cleanupAndExit();
-      return;
-    }
-
-    // WORKSPACE MODE
-    if (inWorkspace) {
-      if (isExecuting) return;
-
-      if (key.name === 'escape') {
-        leaveWorkspace();
-        return;
+  rl.on('close', () => {
+    // EOF: tunggu antrean & tugas berjalan selesai sebelum keluar.
+    if (!draining && pending.length === 0 && !session.busy) exitCleanly();
+    inputClosed = true;
+    const wait = setInterval(() => {
+      if (!draining && pending.length === 0 && !session.busy) {
+        clearInterval(wait);
+        exitCleanly();
       }
-
-      if (key.name === 'return') {
-        const query = currentTaskInput.trim();
-        if (!query) return;
-
-        if (query === '/exit' || query === 'exit' || query === ':q') {
-          cleanupAndExit();
-          return;
-        }
-
-        if (query === '/model' || query === '/back') {
-          leaveWorkspace();
-          return;
-        }
-
-        runPromptStream(query);
-        return;
-      }
-
-      if (key.name === 'backspace') {
-        currentTaskInput = currentTaskInput.slice(0, -1);
-        drawWorkspaceScreen(activeModel, sessionTimeLeft, currentTaskInput);
-        return;
-      }
-
-      if (str && !key.ctrl && !key.meta && !str.startsWith('\x1b')) {
-        currentTaskInput += str;
-        drawWorkspaceScreen(activeModel, sessionTimeLeft, currentTaskInput);
-        return;
-      }
-      return;
-    }
-
-    // SELECTION MODAL MODE
-    if (key.name === 'escape' || str === 'q') {
-      cleanupAndExit();
-      return;
-    }
-
-    copiedNotice = false;
-
-    if (key.name === 'down') {
-      if (!expanded) {
-        cursorIdx = (cursorIdx + 1) % 4;
-      } else {
-        if (cursorIdx >= 10 && cursorIdx < 10 + CODING_MODELS.length - 1) {
-          cursorIdx++;
-        } else if (cursorIdx === 10 + CODING_MODELS.length - 1) {
-          cursorIdx = 20;
-        } else {
-          cursorIdx = 10;
-        }
-      }
-      drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
-      return;
-    }
-
-    if (key.name === 'up') {
-      if (!expanded) {
-        cursorIdx = (cursorIdx - 1 + 4) % 4;
-      } else {
-        if (cursorIdx === 20) {
-          cursorIdx = 10 + CODING_MODELS.length - 1;
-        } else if (cursorIdx > 10) {
-          cursorIdx--;
-        } else {
-          cursorIdx = 20;
-        }
-      }
-      drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
-      return;
-    }
-
-    if (str === 'c' || str === 'C') {
-      cursorIdx = 3;
-      triggerCopyLink();
-      return;
-    }
-
-    if (key.name === 'return' || key.name === 'space') {
-      if (!expanded) {
-        if (cursorIdx === 0 || cursorIdx === 2) {
-          enterWorkspace();
-        } else if (cursorIdx === 1) {
-          expanded = true;
-          cursorIdx = 10;
-          drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
-        } else if (cursorIdx === 3) {
-          triggerCopyLink();
-        }
-      } else {
-        if (cursorIdx === 20) {
-          expanded = false;
-          cursorIdx = 1;
-          drawSelectionModal(activeModel, userMeta, expanded, cursorIdx, copiedNotice);
-        } else if (cursorIdx >= 10) {
-          const selected = CODING_MODELS[cursorIdx - 10];
-          if (selected) {
-            activeModel = selected;
-            saveConfig({ defaultModel: activeModel.id });
-            expanded = false;
-            enterWorkspace();
-          }
-        }
-      }
-      return;
-    }
+    }, 150);
   });
 }
+
+// ------------------------------------------------------------------- commands
 
 program
-  .name('sarang')
-  .description('SarangAI CLI — Gateway AI Coding Workspace')
-  .version(require('../package.json').version)
-  .action(() => {
-    startInteractiveSession();
+  .command('run [prompt...]')
+  .alias('workspace')
+  .description('Mulai sesi autonomous coding (REPL interaktif)')
+  .option('-m, --model <alias>', 'Model: glm | sonnet | luna | deepseek | mimo', 'glm')
+  .action(async (promptParts: string[] | undefined, options) => {
+    const initialPrompt = promptParts && promptParts.length > 0 ? promptParts.join(' ') : undefined;
+    await startWorkspace(options.model, initialPrompt);
   });
+
+program.action(async () => {
+  await startWorkspace('glm');
+});
 
 program.parse(process.argv);

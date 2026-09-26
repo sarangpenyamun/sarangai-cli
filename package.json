@@ -1,18 +1,21 @@
 {
   "name": "sarangai-cli",
-  "version": "1.0.10",
+  "version": "1.1.0",
   "description": "CLI resmi SarangAI — Gateway multi-model AI langsung dari terminal Anda",
   "main": "dist/index.js",
   "bin": {
     "sarang": "dist/index.js",
-    "sarangai": "dist/index.cjs"
+    "sarangai": "dist/index.js"
   },
   "files": [
     "dist"
   ],
   "scripts": {
     "build": "tsup && chmod +x dist/index.js",
-    "prepublishOnly": "npm run build"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
     "sarangai",
@@ -26,24 +29,18 @@
   ],
   "author": "SarangAI Team",
   "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "chalk": "^4.1.2",
-    "clipboardy": "^5.3.2",
-    "commander": "^12.1.0",
-    "ink": "^6.8.0",
-    "ora": "^5.4.1",
-    "prompts": "^2.4.2",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "readline-sync": "^1.4.10"
+    "commander": "^12.1.0"
   },
   "devDependencies": {
-    "@types/clipboardy": "^1.1.0",
     "@types/node": "^20.14.9",
-    "@types/prompts": "^2.4.9",
-    "@types/react": "^19.3.0",
-    "@types/readline-sync": "^1.4.8",
+    "@vitest/coverage-v8": "^2.1.9",
     "tsup": "^8.5.1",
-    "typescript": "^5.5.2"
+    "typescript": "^5.5.2",
+    "vitest": "^2.1.9"
   }
 }

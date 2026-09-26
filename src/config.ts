@@ -10,18 +10,23 @@ export interface SarangConfig {
 
 const CONFIG_FILE = path.join(os.homedir(), '.sarangairc');
 
+export const DEFAULT_CONFIG: SarangConfig = {
+  baseUrl: 'https://idshop.or.id',
+  defaultModel: 'glm',
+};
+
 export function getConfig(): SarangConfig {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
       const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as SarangConfig;
+      }
     }
   } catch {}
 
-  return {
-    baseUrl: 'https://idshop.or.id',
-    defaultModel: 'deepseek/deepseek-chat',
-  };
+  return { ...DEFAULT_CONFIG };
 }
 
 export function saveConfig(newConfig: Partial<SarangConfig>): void {
