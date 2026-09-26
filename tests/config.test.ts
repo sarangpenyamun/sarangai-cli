@@ -24,7 +24,7 @@ const tmpDir = (globalThis as { __SARANGAI_TMP__?: string }).__SARANGAI_TMP__ as
 const CONFIG_FILE = path.join(tmpDir, '.sarangairc');
 
 const DEFAULTS: SarangConfig = {
-  baseUrl: 'https://idshop.or.id',
+  baseUrl: 'https://sarangai.id',
   defaultModel: 'glm',
 };
 

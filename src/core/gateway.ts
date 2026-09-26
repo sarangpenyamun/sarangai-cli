@@ -34,7 +34,7 @@ export async function streamChatCompletion({
     throw new Error('API Key is not configured in ~/.sarangairc');
   }
 
-  const baseUrl = config.baseUrl || 'https://idshop.or.id';
+  const baseUrl = config.baseUrl || 'https://sarangai.id';
   const url = `${baseUrl.replace(/\/+$/, '')}/api/gateway/v1/chat/completions`;
 
   const response = await fetch(url, {

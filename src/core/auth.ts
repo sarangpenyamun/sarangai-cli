@@ -56,7 +56,7 @@ export async function fetchUserMeta(baseUrl: string, token: string): Promise<Use
 
 export async function ensureAuthenticated(): Promise<{ token: string; stats: UserStats }> {
   const cfg = getConfig();
-  const baseUrl = cfg.baseUrl || 'https://idshop.or.id';
+  const baseUrl = cfg.baseUrl || 'https://sarangai.id';
   const token = detectLocalSessionToken();
 
   if (!token) {

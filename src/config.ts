@@ -11,7 +11,7 @@ export interface SarangConfig {
 const CONFIG_FILE = path.join(os.homedir(), '.sarangairc');
 
 export const DEFAULT_CONFIG: SarangConfig = {
-  baseUrl: 'https://idshop.or.id',
+  baseUrl: 'https://sarangai.id',
   defaultModel: 'glm',
 };
 

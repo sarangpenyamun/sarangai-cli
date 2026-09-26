@@ -66,7 +66,7 @@ SarangAI reads its gateway credentials from, in order:
 1. `SARANGAI_TOKEN` / `SARANGAI_API_KEY` environment variables
 2. `apiKey` in `~/.sarangairc`
 
-`~/.sarangairc` also accepts `baseUrl` (default `https://idshop.or.id`) and `defaultModel` (`glm | sonnet | luna | deepseek | mimo`).
+`~/.sarangairc` also accepts `baseUrl` (default `https://sarangai.id`) and `defaultModel` (`glm | sonnet | luna | deepseek | mimo`).
 
 ## CLI Commands & Navigation
 
