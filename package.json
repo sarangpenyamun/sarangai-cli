@@ -1,6 +1,6 @@
 {
   "name": "sarangai-cli",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "CLI resmi SarangAI — Gateway multi-model AI langsung dari terminal Anda",
   "main": "dist/index.js",
   "bin": {
@@ -29,6 +29,14 @@
   ],
   "author": "SarangAI Team",
   "license": "MIT",
+  "homepage": "https://sarangai.id",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sarangpenyamun/sarangai-cli.git"
+  },
+  "bugs": {
+    "url": "https://sarangai.id"
+  },
   "engines": {
     "node": ">=18"
   },
