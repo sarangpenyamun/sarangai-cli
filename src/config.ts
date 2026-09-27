@@ -34,3 +34,8 @@ export function saveConfig(newConfig: Partial<SarangConfig>): void {
   const merged = { ...current, ...newConfig };
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2), 'utf-8');
 }
+
+/** Base URL gateway: env override > ~/.sarangairc > default (https://sarangai.id). */
+export function resolveBaseUrl(): string {
+  return process.env.SARANGAI_BASE_URL || getConfig().baseUrl || DEFAULT_CONFIG.baseUrl!;
+}

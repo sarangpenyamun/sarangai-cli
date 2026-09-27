@@ -2,9 +2,11 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import readline from 'readline';
 import { LOCKED_CODING_MODELS, resolveModel, findModel, MODEL_ALIAS_LIST, CodingModel } from './constants';
-import { ensureAuthenticated } from './core/auth';
+import { ensureAuthenticated, runBrowserAuth, hasLocalCredentials, fetchUserMeta } from './core/auth';
 import { runAutonomousAgent, AgentRunResult } from './core/workspace';
 import { createTui, TerminalTui } from './ui/tui';
+import { resolveBaseUrl } from './config';
+import { printBanner } from './ui/banner';
 import { HistoryTurn, summarizeResult, truncateOnLineBoundary } from './core/memory';
 import type { UserStats } from './ui/banner';
 
@@ -335,6 +337,26 @@ async function startWorkspace(modelAlias = 'glm', initialPrompt?: string): Promi
 
 // ------------------------------------------------------------------- commands
 
+// Guard exception: `sarang login` bebas dari pengecekan config ~/.sarangairc.
+program
+  .command('login')
+  .description('Login via browser / device code auth (https://sarangai.id)')
+  .action(async () => {
+    const baseUrl = resolveBaseUrl();
+    const token = await runBrowserAuth(baseUrl);
+    if (!token) process.exit(1);
+
+    // Render banner + status akun real-time persis layout sesi aktif.
+    const stats = await fetchUserMeta(baseUrl, token);
+    printBanner(stats);
+
+    if (stats) {
+      console.log(chalk.green('✔ Login berhasil. Selamat datang kembali!'));
+    } else {
+      console.log(chalk.yellow('⚠ API Key tersimpan, namun status akun belum terverifikasi. Coba lagi nanti.'));
+    }
+  });
+
 program
   .command('run [prompt...]')
   .alias('workspace')
@@ -345,7 +367,13 @@ program
     await startWorkspace(options.model, initialPrompt);
   });
 
+// Guard exception: `sarang` tanpa kredensial menjalankan alur login browser,
+// bukan error mati "API Key not found".
 program.action(async () => {
+  if (!hasLocalCredentials()) {
+    const token = await runBrowserAuth(resolveBaseUrl());
+    if (!token) process.exit(1);
+  }
   await startWorkspace('glm');
 });
 
