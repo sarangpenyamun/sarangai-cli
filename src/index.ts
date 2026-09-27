@@ -8,12 +8,15 @@ import { createTui, TerminalTui } from './ui/tui';
 import { HistoryTurn, summarizeResult, truncateOnLineBoundary } from './core/memory';
 import type { UserStats } from './ui/banner';
 
+// Versi CLI diambil dinamis dari package.json agar selalu sinkron otomatis.
+import pkg from '../package.json';
+
 const program = new Command();
 
 program
   .name('sarang')
   .description('SarangAI Autonomous Coding Agent CLI')
-  .version('1.1.0');
+  .version(pkg.version);
 
 // ------------------------------------------------------------------ helpers
 
